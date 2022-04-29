@@ -1,0 +1,1 @@
+﻿<%@ ServiceHost Language="C#" Debug="true" Factory="WCFNonce.Service.Helpers.NonceServiceHostFactory" %>
