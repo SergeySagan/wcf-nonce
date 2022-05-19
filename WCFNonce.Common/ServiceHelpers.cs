@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Configuration;
 using System.IdentityModel.Claims;
@@ -13,8 +14,12 @@ namespace WCFNonce.Common
 {
     public static class ServiceHelpers
     {
-        public static long StaleTimestampSeconds => 3;
+        private static ConcurrentDictionary<string, long> RequestCache { get; set; }
 
+        public static long StaleTimestampSeconds => 60;
+
+        
+        
         public static bool IsNonceValid()
         {
             var nonceModel = GetNonceModelFromRequest();
@@ -26,6 +31,12 @@ namespace WCFNonce.Common
                 return false;
 
             if (IsNonceStale(nonceModel.Timestamp))
+                return false;
+            
+            if (IsNonceInCache(nonceModel.Nonce))
+                return false;
+
+            if (!RequestCache.TryAdd(nonceModel.Nonce, DateTime.UtcNow.Ticks))
                 return false;
 
             return nonceModel.Nonce == CreateNonceModel(GetIpAddress(), nonceModel.Timestamp).Nonce;
@@ -71,6 +82,36 @@ namespace WCFNonce.Common
         }
 
 
+        
+        private static bool IsNonceInCache(string nonce)
+        {
+            MaintainCache();
+
+            return RequestCache.ContainsKey(nonce);
+        }
+
+        private static void MaintainCache()
+        {
+            if (RequestCache == null)
+                RequestCache = new ConcurrentDictionary<string, long>();
+
+            var staleLimit = DateTime.UtcNow.AddSeconds(-1 * StaleTimestampSeconds).Ticks;
+
+            var staleNonce = new List<string>();
+            foreach (var cache in RequestCache)
+            {
+                if (cache.Value < staleLimit)
+                    staleNonce.Add(cache.Key);
+            }
+
+            if (!staleNonce.Any())
+                return;
+
+            foreach (var nonce in staleNonce)
+            {
+                RequestCache.TryRemove(nonce, out var dummy);
+            }
+        }
 
         private static string GetIpAddress()
         {
